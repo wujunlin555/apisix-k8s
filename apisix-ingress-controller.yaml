@@ -1,0 +1,179 @@
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  labels:
+    app.kubernetes.io/instance: apisix
+    app.kubernetes.io/name: ingress-controller
+    app.kubernetes.io/version: 1.6.0
+  name: apisix-ingress-controller
+  namespace: apisix
+spec:
+  progressDeadlineSeconds: 600
+  replicas: 1
+  revisionHistoryLimit: 10
+  selector:
+    matchLabels:
+      app.kubernetes.io/instance: apisix
+      app.kubernetes.io/name: ingress-controller
+  strategy:
+    rollingUpdate:
+      maxSurge: 25%
+      maxUnavailable: 25%
+    type: RollingUpdate
+  template:
+    metadata:
+      creationTimestamp: null
+      labels:
+        app.kubernetes.io/instance: apisix
+        app.kubernetes.io/name: ingress-controller
+    spec:
+      containers:
+      - command:
+        - /ingress-apisix/apisix-ingress-controller
+        - ingress
+        - --config-path
+        - /ingress-apisix/conf/config.yaml
+        env:
+        - name: POD_NAMESPACE
+          valueFrom:
+            fieldRef:
+              apiVersion: v1
+              fieldPath: metadata.namespace
+        - name: POD_NAME
+          valueFrom:
+            fieldRef:
+              apiVersion: v1
+              fieldPath: metadata.name
+        image: apache/apisix-ingress-controller:1.6.0
+        imagePullPolicy: IfNotPresent
+        livenessProbe:
+          failureThreshold: 3
+          httpGet:
+            path: /healthz
+            port: 8080
+            scheme: HTTP
+          periodSeconds: 10
+          successThreshold: 1
+          timeoutSeconds: 1
+        name: ingress-controller
+        ports:
+        - containerPort: 8080
+          name: http
+          protocol: TCP
+        readinessProbe:
+          failureThreshold: 3
+          httpGet:
+            path: /healthz
+            port: 8080
+            scheme: HTTP
+          periodSeconds: 10
+          successThreshold: 1
+          timeoutSeconds: 1
+        resources: {}
+        terminationMessagePath: /dev/termination-log
+        terminationMessagePolicy: File
+        volumeMounts:
+        - mountPath: /ingress-apisix/conf
+          name: configuration
+      dnsPolicy: ClusterFirst
+      initContainers:
+      - command:
+        - sh
+        - -c
+        - until nc -z apisix-admin.apisix.svc.cluster.local 9180 ; do echo
+          waiting for apisix-admin; sleep 2; done;
+        image: busybox:1.28
+        imagePullPolicy: IfNotPresent
+        name: wait-apisix-admin
+        resources: {}
+        securityContext: {}
+        terminationMessagePath: /dev/termination-log
+        terminationMessagePolicy: File
+      restartPolicy: Always
+      schedulerName: default-scheduler
+      securityContext: {}
+      serviceAccount: apisix-ingress-controller
+      serviceAccountName: apisix-ingress-controller
+      terminationGracePeriodSeconds: 30
+      volumes:
+      - configMap:
+          defaultMode: 420
+          items:
+          - key: config.yaml
+            path: config.yaml
+          name: apisix-configmap
+        name: configuration
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  labels:
+    app.kubernetes.io/instance: apisix
+    app.kubernetes.io/name: ingress-controller
+    app.kubernetes.io/version: 1.6.0
+  name: apisix-configmap
+  namespace: apisix
+data:
+  config.yaml: |-
+    # log options
+    log_level: "info"
+    log_output: "stderr"
+    cert_file: "/etc/webhook/certs/cert.pem"
+    key_file: "/etc/webhook/certs/key.pem"
+    http_listen: ":8080"
+    https_listen: ":8443"
+    ingress_publish_service: ""
+    enable_profiling: true
+    apisix-resource-sync-interval: 1h
+    kubernetes:
+      kubeconfig: ""
+      resync_interval: "6h"
+      namespace_selector:
+      - ""
+      election_id: "ingress-apisix-leader"
+      ingress_class: "apisix"
+      ingress_version: "networking/v1"
+      watch_endpointslices: false
+      apisix_route_version: "apisix.apache.org/v2"
+      enable_gateway_api: false
+      apisix_version: "apisix.apache.org/v2"
+      plugin_metadata_cm: ""
+    apisix:
+      admin_api_version: "v3"
+      default_cluster_base_url: http://apisix-admin.apisix.svc.cluster.local:9180/apisix/admin 
+      default_cluster_admin_key: "edd1c9f034335f136f87ad84b625c8f1"
+      default_cluster_name: "default"
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  labels:
+    app.kubernetes.io/instance: apisix
+    app.kubernetes.io/name: ingress-controller
+    app.kubernetes.io/version: 1.6.0
+  name: apisix-ingress-controller
+  namespace: apisix
+spec:
+  internalTrafficPolicy: Cluster
+  ipFamilies:
+  - IPv4
+  ipFamilyPolicy: SingleStack
+  ports:
+  - name: http
+    port: 80
+    protocol: TCP
+    targetPort: 8080
+  selector:
+    app.kubernetes.io/instance: apisix
+    app.kubernetes.io/name: ingress-controller
+  sessionAffinity: None
+  type: ClusterIP
+---
+apiVersion: v1
+automountServiceAccountToken: true
+kind: ServiceAccount
+metadata:
+  name: apisix-ingress-controller
+  namespace: apisix
