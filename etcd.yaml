@@ -22,6 +22,7 @@ spec:
       containers:
         - name: apisix-etcd
           image: docker.io/bitnami/etcd:3.5.1-debian-10-r31
+          imagePullPolicy: IfNotPresent
           ports:
             - name: client
               containerPort: 2379
